@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <title>IMG → PDF</title>
+
+  <!-- PWA / iOS Meta Tags -->
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="IMG→PDF"/>
+  <meta name="theme-color" content="#0a0a0a"/>
+
+  <!-- iOS Home Screen Icons (generate these at https://realfavicongenerator.net) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-192.png"/>
+  <link rel="apple-touch-icon" sizes="152x152" href="icon-192.png"/>
+  <link rel="apple-touch-icon" sizes="120x120" href="icon-192.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --border: #222;
+      --accent: #e8ff47;
+      --accent2: #ff4757;
+      --text: #f0f0f0;
+      --muted: #555;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: max(40px, env(safe-area-inset-top)) 20px max(80px, env(safe-area-inset-bottom));
+      padding-left: max(20px, env(safe-area-inset-left));
+      padding-right: max(20px, env(safe-area-inset-right));
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Noise overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 820px;
+    }
+
+    header {
+      margin-bottom: 48px;
+      display: flex;
+      align-items: flex-end;
+      gap: 16px;
+    }
+
+    .logo-block {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-tag {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    h1 {
+      font-size: clamp(42px, 8vw, 72px);
+      font-weight: 800;
+      line-height: 0.9;
+      letter-spacing: -0.03em;
+    }
+
+    h1 span {
+      color: var(--accent);
+      display: inline-block;
+      transform: skewX(-4deg);
+    }
+
+    .arrow-deco {
+      font-size: 48px;
+      color: var(--muted);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    /* Drop Zone */
+    #dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 4px;
+      padding: 60px 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      background: var(--surface);
+      position: relative;
+      overflow: hidden;
+    }
+
+    #dropzone:hover, #dropzone.drag-over {
+      border-color: var(--accent);
+      background: #141408;
+    }
+
+    #dropzone.drag-over::after {
+      content: 'DROP IT';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      font-weight: 800;
+      color: var(--accent);
+      background: rgba(232,255,71,0.05);
+    }
+
+    .drop-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .drop-text {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .drop-sub {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+    }
+
+    #fileInput { display: none; }
+
+    /* Options bar */
+    .options-bar {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .opt-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 2px;
+    }
+
+    .opt-group label {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+
+    .opt-group select {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .opt-group select option {
+      background: #1a1a1a;
+    }
+
+    /* Preview Grid */
+    #preview-section {
+      margin-top: 32px;
+      display: none;
+    }
+
+    .section-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    #image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 8px;
+    }
+
+    .thumb-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+      aspect-ratio: 1;
+      cursor: grab;
+      transition: border-color 0.15s, transform 0.15s;
+    }
+
+    .thumb-card:hover { border-color: #444; transform: scale(1.02); }
+    .thumb-card.drag-source { opacity: 0.4; border-color: var(--accent); }
+    .thumb-card.drag-target { border-color: var(--accent); border-style: solid; }
+
+    .thumb-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .thumb-remove {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: var(--accent2);
+      color: white;
+      border: none;
+      border-radius: 2px;
+      width: 20px;
+      height: 20px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .thumb-card:hover .thumb-remove { opacity: 1; }
+
+    .thumb-num {
+      position: absolute;
+      bottom: 4px;
+      left: 4px;
+      background: rgba(0,0,0,0.7);
+      color: var(--accent);
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      padding: 2px 5px;
+      border-radius: 1px;
+    }
+
+    /* Convert Button */
+    #convert-btn {
+      margin-top: 32px;
+      width: 100%;
+      padding: 20px;
+      background: var(--accent);
+      color: #0a0a0a;
+      border: none;
+      font-family: 'Syne', sans-serif;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: transform 0.1s, filter 0.1s;
+      display: none;
+    }
+
+    #convert-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    #convert-btn:active { transform: translateY(0); }
+    #convert-btn:disabled {
+      background: #333;
+      color: var(--muted);
+      cursor: not-allowed;
+      transform: none;
+      filter: none;
+    }
+
+    /* Progress */
+    #progress-wrap {
+      margin-top: 16px;
+      display: none;
+    }
+
+    .progress-bar-track {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s;
+      border-radius: 2px;
+    }
+
+    .progress-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      letter-spacing: 0.1em;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--accent);
+      color: #0a0a0a;
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 12px 24px;
+      border-radius: 2px;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 100;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .hint {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 12px;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="logo-block">
+      <span class="logo-tag">// tool</span>
+      <h1>IMG<span>→</span>PDF</h1>
+    </div>
+    <div class="arrow-deco" style="margin-left:auto; margin-bottom:12px; font-family:'Space Mono',monospace; font-size:13px; color:#333;">
+      100% browser · no upload · free
+    </div>
+  </header>
+
+  <div id="dropzone" onclick="document.getElementById('fileInput').click()">
+    <span class="drop-icon">🖼️</span>
+    <p class="drop-text">Drop images here or click to browse</p>
+    <p class="drop-sub">JPG · PNG · WEBP · GIF · BMP · Multiple files OK</p>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" multiple />
+
+  <div class="options-bar">
+    <div class="opt-group">
+      <label>Page Size</label>
+      <select id="pageSize">
+        <option value="a4">A4</option>
+        <option value="letter">Letter</option>
+        <option value="fit">Fit to Image</option>
+      </select>
+    </div>
+    <div class="opt-group">
+      <label>Orientation</label>
+      <select id="orientation">
+        <option value="auto">Auto</option>
+        <option value="portrait">Portrait</option>
+        <option value="landscape">Landscape</option>
+      </select>
+    </div>
+    <div class="opt-group">
+      <label>Margin</label>
+      <select id="margin">
+        <option value="0">None</option>
+        <option value="10" selected>Small</option>
+        <option value="20">Medium</option>
+        <option value="40">Large</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="preview-section">
+    <div class="section-label">Images <span id="img-count" style="color:var(--accent)">0</span></div>
+    <p class="hint" style="margin-bottom:12px;">Drag thumbnails to reorder · hover to remove</p>
+    <div id="image-grid"></div>
+  </div>
+
+  <button id="convert-btn">⚡ Convert to PDF</button>
+
+  <div id="progress-wrap">
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <p class="progress-label" id="progress-label">Processing...</p>
+  </div>
+</div>
+
+<div id="toast">✓ PDF Downloaded!</div>
+
+<script>
+  const { jsPDF } = window.jspdf;
+  let images = []; // {file, dataUrl, name}
+  let dragSrcIdx = null;
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const grid = document.getElementById('image-grid');
+  const previewSection = document.getElementById('preview-section');
+  const convertBtn = document.getElementById('convert-btn');
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressFill = document.getElementById('progress-fill');
+  const progressLabel = document.getElementById('progress-label');
+  const imgCount = document.getElementById('img-count');
+  const toast = document.getElementById('toast');
+
+  // Drag-over on dropzone
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    handleFiles([...e.dataTransfer.files]);
+  });
+
+  fileInput.addEventListener('change', () => handleFiles([...fileInput.files]));
+
+  function handleFiles(files) {
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+
+    imageFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        images.push({ file, dataUrl: e.target.result, name: file.name });
+        renderGrid();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderGrid() {
+    grid.innerHTML = '';
+    imgCount.textContent = images.length;
+    previewSection.style.display = images.length ? 'block' : 'none';
+    convertBtn.style.display = images.length ? 'block' : 'none';
+
+    images.forEach((img, i) => {
+      const card = document.createElement('div');
+      card.className = 'thumb-card';
+      card.draggable = true;
+      card.dataset.idx = i;
+
+      const imgEl = document.createElement('img');
+      imgEl.src = img.dataUrl;
+      imgEl.alt = img.name;
+
+      const num = document.createElement('span');
+      num.className = 'thumb-num';
+      num.textContent = i + 1;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'thumb-remove';
+      removeBtn.textContent = '×';
+      removeBtn.title = 'Remove';
+      removeBtn.onclick = (e) => { e.stopPropagation(); images.splice(i, 1); renderGrid(); };
+
+      card.appendChild(imgEl);
+      card.appendChild(num);
+      card.appendChild(removeBtn);
+
+      // Drag to reorder
+      card.addEventListener('dragstart', () => { dragSrcIdx = i; card.classList.add('drag-source'); });
+      card.addEventListener('dragend', () => { card.classList.remove('drag-source'); document.querySelectorAll('.thumb-card').forEach(c => c.classList.remove('drag-target')); });
+      card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-target'); });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-target'));
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (dragSrcIdx === null || dragSrcIdx === i) return;
+        const moved = images.splice(dragSrcIdx, 1)[0];
+        images.splice(i, 0, moved);
+        renderGrid();
+      });
+
+      grid.appendChild(card);
+    });
+  }
+
+  convertBtn.addEventListener('click', async () => {
+    if (!images.length) return;
+    convertBtn.disabled = true;
+    progressWrap.style.display = 'block';
+
+    const pageSize = document.getElementById('pageSize').value;
+    const orientation = document.getElementById('orientation').value;
+    const margin = parseInt(document.getElementById('margin').value);
+
+    try {
+      for (let i = 0; i < images.length; i++) {
+        const pct = Math.round(((i) / images.length) * 90);
+        progressFill.style.width = pct + '%';
+        progressLabel.textContent = `Processing image ${i + 1} of ${images.length}...`;
+
+        await new Promise(r => setTimeout(r, 10)); // let UI breathe
+
+        const img = new Image();
+        img.src = images[i].dataUrl;
+        await new Promise(r => { img.onload = r; });
+
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+
+        let docOri;
+        if (orientation === 'auto') {
+          docOri = iw >= ih ? 'landscape' : 'portrait';
+        } else {
+          docOri = orientation;
+        }
+
+        let pw, ph; // page dims in mm
+        if (pageSize === 'a4') { pw = 210; ph = 297; }
+        else if (pageSize === 'letter') { pw = 215.9; ph = 279.4; }
+        else { // fit
+          const ratio = 25.4 / 96; // px to mm (96dpi assumption)
+          pw = iw * ratio;
+          ph = ih * ratio;
+        }
+
+        if (docOri === 'landscape' && pageSize !== 'fit') { [pw, ph] = [ph, pw]; }
+
+        if (i === 0) {
+          window._pdf = new jsPDF({ orientation: docOri, unit: 'mm', format: pageSize === 'fit' ? [pw, ph] : pageSize });
+        } else {
+          window._pdf.addPage(pageSize === 'fit' ? [pw, ph] : pageSize, docOri);
+        }
+
+        const usableW = pw - margin * 2;
+        const usableH = ph - margin * 2;
+        const imgRatio = iw / ih;
+        const boxRatio = usableW / usableH;
+
+        let drawW, drawH;
+        if (imgRatio > boxRatio) {
+          drawW = usableW;
+          drawH = usableW / imgRatio;
+        } else {
+          drawH = usableH;
+          drawW = usableH * imgRatio;
+        }
+
+        const x = margin + (usableW - drawW) / 2;
+        const y = margin + (usableH - drawH) / 2;
+
+        window._pdf.addImage(images[i].dataUrl, 'JPEG', x, y, drawW, drawH);
+      }
+
+      progressFill.style.width = '100%';
+      progressLabel.textContent = 'Saving PDF...';
+      await new Promise(r => setTimeout(r, 200));
+
+      window._pdf.save('converted.pdf');
+
+      showToast('✓ PDF Downloaded!');
+    } catch (err) {
+      showToast('❌ Error: ' + err.message);
+      console.error(err);
+    } finally {
+      convertBtn.disabled = false;
+      progressWrap.style.display = 'none';
+      progressFill.style.width = '0%';
+    }
+  });
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+</script>
+
+<!-- iOS Install Banner -->
+<div id="ios-banner" style="display:none; position:fixed; bottom:0; left:0; right:0; background:#111; border-top:1px solid #222; padding:16px max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); z-index:200; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:28px;">📲</span>
+  <div style="flex:1;">
+    <div style="font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#f0f0f0;">Install App</div>
+    <div style="font-family:'Space Mono',monospace; font-size:11px; color:#555; margin-top:2px;">Tap <strong style="color:#e8ff47;">Share</strong> → <strong style="color:#e8ff47;">Add to Home Screen</strong></div>
+  </div>
+  <button onclick="document.getElementById('ios-banner').style.display='none'" style="background:none;border:none;color:#555;font-size:20px;cursor:pointer;padding:4px;">×</button>
+</div>
+
+<script>
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW error:', err));
+    });
+  }
+
+  // Show iOS install banner only on iOS Safari (not already installed)
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone;
+  const bannerDismissed = sessionStorage.getItem('banner-dismissed');
+
+  if (isIOS && !isStandalone && !bannerDismissed) {
+    document.getElementById('ios-banner').style.display = 'flex';
+    document.getElementById('ios-banner').querySelector('button').addEventListener('click', () => {
+      sessionStorage.setItem('banner-dismissed', '1');
+    });
+  }
+</script>
+</body>
+</html>
